@@ -1,0 +1,53 @@
+- name: Add cron jobs for updating, rebooting server, and log rotation
+  hosts: _personal_wireguard_server
+  gather_facts: true
+  become: true
+  vars:
+    ansible_connection: aws_ssm
+    ansible_aws_ssm_region: 'us-east-1'
+    ansible_aws_ssm_bucket_name: personal-ansible-ssm-transfers
+    update_hour: 8 # Updated from 6 to 8
+    update_minute: 0
+    reboot_hour: 8 # Updated from 6 to 8
+    reboot_minute: 30
+    logrotate_hour: 0
+    logrotate_minute: 0
+    logrotate_weekday: 1
+    cron_job_user: root
+    cron_file_name: update_reboot
+    logrotate_status_file: /var/lib/logrotate/status
+    logrotate_config_file: /etc/logrotate.conf
+  tasks:
+    - name: Update package cache
+      ansible.builtin.apt:
+        update_cache: true
+    - name: Upgrade packages
+      ansible.builtin.apt:
+        upgrade: safe
+    - name: Perform dist-upgrade
+      ansible.builtin.apt:
+        upgrade: dist
+    - name: Ensure cron job for server update
+      ansible.builtin.cron:
+        name: "Update server at {{ update_hour }}:{{ update_minute }} UTC"
+        minute: "{{ update_minute }}"
+        hour: "{{ update_hour }}"
+        job: "sudo apt update && sudo apt dist-upgrade -y"
+        cron_file: "{{ cron_file_name }}"
+        user: "{{ cron_job_user }}"
+    - name: Ensure cron job for server reboot
+      ansible.builtin.cron:
+        name: "Reboot server at {{ reboot_hour }}:{{ reboot_minute }} UTC"
+        minute: "{{ reboot_minute }}"
+        hour: "{{ reboot_hour }}"
+        job: "sudo reboot"
+        cron_file: "{{ cron_file_name }}"
+        user: "{{ cron_job_user }}"
+    - name: Ensure logrotate job
+      ansible.builtin.cron:
+        name: "Log rotation"
+        minute: "{{ logrotate_minute }}"
+        hour: "{{ logrotate_hour }}"
+        weekday: "{{ logrotate_weekday }}"
+        job: "logrotate -s {{ logrotate_status_file }} {{ logrotate_config_file }}"
+        user: "{{ cron_job_user }}"

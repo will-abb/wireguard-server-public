@@ -1,0 +1,91 @@
+- name: Setup Environment for WireGuard Server
+  hosts: all
+  become: true
+  vars:
+    ansible_connection: aws_ssm
+    ansible_aws_ssm_region: 'us-east-1'
+    ansible_aws_ssm_bucket_name: personal-ansible-ssm-transfers
+    wireguard_interface: "wg1"
+    wireguard_port: "51820"
+    base_ip: "10.0.0"
+    server_ip: "{{ base_ip }}.1"
+    client_ip: "{{ base_ip }}.2"
+    peer_public_key: "{{ lookup('env', 'PEER_PUBLIC_KEY') }}"
+    preshared_key: "{{ lookup('env', 'PRESHARED_KEY') }}"
+  pre_tasks:
+    - name: Check if environment variables are set
+      fail:
+        msg: "Environment variables PEER_PUBLIC_KEY and PRESHARED_KEY must be set."
+      when: peer_public_key is none or peer_public_key == "" or preshared_key is none or preshared_key == ""
+    - name: Gather network facts
+      ansible.builtin.setup:
+        gather_subset: network
+      register: net_facts
+    - name: Set network interface dynamically
+      set_fact:
+        primary_interface: "{{ net_facts['ansible_facts']['ansible_default_ipv4']['interface'] }}"
+  tasks:
+    #### Network Configuration Tasks ####
+    - name: Enable IP Forwarding
+      ansible.builtin.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: true
+    - name: Setup NAT with iptables
+      ansible.builtin.iptables:
+        table: nat
+        chain: POSTROUTING
+        out_interface: "{{ primary_interface }}"
+        jump: MASQUERADE
+    - name: Install iptables-persistent for permanent rules
+      ansible.builtin.apt:
+        name: iptables-persistent
+        state: present
+    - name: Save iptables rules
+      ansible.builtin.shell: "iptables-save > /etc/iptables/rules.v4"
+    #### WireGuard Server Configuration Tasks ####
+    - name: Install WireGuard
+      ansible.builtin.apt:
+        name: wireguard
+        state: present
+        update_cache: true
+    - name: Check if WireGuard Private Key exists in wg1.conf
+      ansible.builtin.command: grep -q '^PrivateKey' /etc/wireguard/{{ wireguard_interface }}.conf
+      register: privatekey_check
+      ignore_errors: true
+      changed_when: false
+    - name: Generate WireGuard Private Key
+      ansible.builtin.command: wg genkey
+      register: wireguard_private_key
+      when: privatekey_check.rc != 0
+      no_log: true
+      changed_when: false
+    - name: Generate WireGuard Public Key
+      ansible.builtin.command: wg pubkey
+      args:
+        stdin: "{{ wireguard_private_key.stdout }}"
+      register: wireguard_public_key
+      when: privatekey_check.rc != 0
+      changed_when: false
+    - name: Write WireGuard Public Key to file
+      ansible.builtin.copy:
+        content: "{{ wireguard_public_key.stdout }}"
+        dest: "/etc/wireguard/public.key"
+        mode: "0600"
+      when: privatekey_check.rc != 0
+    - name: Configure WireGuard Interface
+      ansible.builtin.template:
+        src: ~/repositories/bitbucket/williseed1/wireguard-server/ansible/templates/wg1.conf.j2
+        dest: "/etc/wireguard/{{ wireguard_interface }}.conf"
+        mode: "u=rw,g=,o="
+      when: privatekey_check.rc != 0
+    - name: Enable and Start WireGuard
+      ansible.builtin.systemd:
+        name: "wg-quick@{{ wireguard_interface }}"
+        enabled: true
+        state: started
+    - name: Print WireGuard Public Key
+      debug:
+        msg: "Server Public Key: {{ wireguard_public_key.stdout }}"
+      when: privatekey_check.rc != 0

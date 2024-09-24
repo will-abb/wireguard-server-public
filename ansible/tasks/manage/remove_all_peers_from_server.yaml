@@ -1,0 +1,27 @@
+---
+- name: Remove all peers from WireGuard configuration
+  hosts: _personal_wireguard_server
+  become: true
+  vars:
+    ansible_connection: aws_ssm
+    ansible_aws_ssm_region: 'us-east-1'
+    ansible_aws_ssm_bucket_name: personal-ansible-ssm-transfers
+
+  tasks:
+    - name: Backup original wg1.conf
+      copy:
+        src: /etc/wireguard/wg1.conf
+        dest: /etc/wireguard/wg1.conf.bak
+        remote_src: yes
+        backup: yes
+
+    - name: Remove peer configurations from wg1.conf
+      replace:
+        path: /etc/wireguard/wg1.conf
+        regexp: '(\[Peer\]\nPublicKey.*\nPresharedKey.*\nAllowedIPs.*\n?)'
+        replace: ''
+
+    - name: Restart WireGuard service
+      systemd:
+        name: "wg-quick@wg1"
+        state: restarted

@@ -1,0 +1,11 @@
+[Interface]
+PrivateKey = {{ wireguard_private_key.stdout }}
+Address = {{ server_ip }}/24
+ListenPort = {{ wireguard_port }}
+PostUp = iptables -A FORWARD -i {{ wireguard_interface }} -j ACCEPT; iptables -t nat -A POSTROUTING -o {{ primary_interface }} -j MASQUERADE
+PostDown = iptables -D FORWARD -i {{ wireguard_interface }} -j ACCEPT; iptables -t nat -D POSTROUTING -o {{ primary_interface }} -j MASQUERADE
+
+[Peer]
+PublicKey = {{ peer_public_key }}
+PresharedKey = {{ preshared_key }}
+AllowedIPs = {{ client_ip }}/32

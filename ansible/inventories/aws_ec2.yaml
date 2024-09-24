@@ -1,0 +1,12 @@
+plugin: aws_ec2
+regions:
+  - 'us-east-1'
+keyed_groups:
+  - key: tags.Name
+hostnames:
+  - instance-id
+filters:
+  tag:Name: personal-wireguard-server
+  instance-state-name: running
+compose:
+  ansible_python_interpreter: /usr/bin/env python3
